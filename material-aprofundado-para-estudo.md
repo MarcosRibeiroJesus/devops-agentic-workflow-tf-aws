@@ -3,7 +3,7 @@
 
 Este documento acompanha os slides da live e existe para um único propósito: te dar profundidade suficiente em cada conceito para que, no dia, você possa falar sobre eles com segurança — os slides mostram só a definição resumida; aqui está o "porquê" e o "como funciona por baixo do capô", como nos módulos de fundamentos da Anthropic.
 
-Todas as definições abaixo foram verificadas na documentação oficial (`code.claude.com/docs`, `platform.claude.com/docs`, `claude.com/blog`, `anthropic.com/engineering` e o anúncio original do MCP). As citações diretas estão em itálico.
+Todas as definições abaixo foram verificadas na documentação oficial (`code.claude.com/docs`, `platform.claude.com/docs`, `claude.com/blog`, `anthropic.com/engineering`, `developer.hashicorp.com`, `aws.amazon.com` e o anúncio original do MCP). As citações diretas estão em itálico.
 
 > **Regra de manutenção**: este documento acompanha o `slides.html` linha a linha. Toda vez que um slide novo é criado ou um slide existente é alterado, esta versão é revisada no mesmo momento — nunca fica defasada em relação ao que está na tela.
 
@@ -20,19 +20,27 @@ Todas as definições abaixo foram verificadas na documentação oficial (`code.
    - 1.2 CLAUDE.md
    - 1.3 Skills
    - 1.4 Agents (Subagents)
-   - 1.5 Rules
-   - 1.6 Agents × Skills × Rules — critério de decisão
-   - 1.7 O harness: como as peças viram um agente
-   - 1.8 Terraform, em uma imagem
-   - 1.9 AWS: onde a infraestrutura vai morar
-   - 1.10 Memória (CLAUDE.md vs. Auto Memory)
-   - 1.11 MCP — Model Context Protocol
+   - 1.5 Skills x Agents — a diferença na prática
+   - 1.6 Rules
+   - 1.7 Rules x Hooks — contexto que orienta, execução que bloqueia
+   - 1.8 Agents × Skills × Rules — critério de decisão
+   - 1.9 O harness: como as peças viram um agente
+   - 1.10 Terraform, Infraestrutura como código (IaC)
+   - 1.11 AWS: onde a infraestrutura vai morar
+   - 1.12 Memória (CLAUDE.md vs. Auto Memory)
+   - 1.13 MCP — Model Context Protocol
 3. [Módulo 2 — Segurança](#módulo-2)
    - 2.1 Por que instrução não é controle
    - 2.2 Hooks
    - 2.3 Permissions
    - 2.4 Guardrails para infraestrutura
+   - 2.5 Como o controle é realizado — CLAUDE.md x Rules x Hooks x Permissions
 4. [Módulo 3 — Integrações](#módulo-3)
+   - 3.1 MCP na prática
+   - 3.2 Por dentro do MCP Server do Terraform
+   - 3.3 Por dentro do MCP Server da AWS
+   - 3.4 Memória entre sessões, na prática
+   - 3.5 Como tudo se combina
 5. [Módulo 4 — Demonstração ao vivo](#módulo-4)
    - 4.1 Estrutura do projeto e o CLAUDE.md real
    - 4.2 Anatomia completa de um SKILL.md
@@ -50,11 +58,32 @@ Todas as definições abaixo foram verificadas na documentação oficial (`code.
 
 ### 0.1 O problema real
 
+Hoje, o maior problema no fluxo de trabalho tradicional de um engenheiro DevOps sem agentes de IA é que a maior parte do tempo não é gasta em decisões arquiteturais ou de segurança, mas sim em tarefas repetitivas e manuais de digitação e correção.
+
 Um engenheiro DevOps tradicional gasta a maior parte do tempo em trabalho de **tradução**: pegar uma decisão de arquitetura já tomada (ou tomada na hora, sob pressão) e traduzi-la em artefatos de configuração — HCL do Terraform, YAML de pipelines de CI/CD, JSON de políticas IAM, manifests do Kubernetes, e por aí vai. Esse trabalho de tradução consome tempo, exige memorizar sintaxe e providers, e empurra a revisão de arquitetura e segurança para "quando sobrar tempo" — que, na prática, é sempre depois do prazo.
 
 O workflow agêntico inverte essa equação. O engenheiro deixa de ser o tradutor e passa a ser o **revisor e definidor de regras**: ele descreve a intenção em linguagem natural, define as convenções e os limites de segurança do projeto (é exatamente isso que os mecanismos do Módulo 1 e 2 fazem), e o agente — Claude Code, no nosso caso — assume a tradução para HCL/YAML/JSON. O tempo do engenheiro se desloca de "como escrevo isso" para "isso está arquiteturalmente correto e seguro".
 
 Isso não elimina a responsabilidade do engenheiro — pelo contrário, a concentra onde ela importa mais.
+
+**Isso vale para quase toda área de atuação do DevOps, não só para Terraform e CI/CD:**
+
+| Área | Tradicional (sem IA) | Com IA |
+|---|---|---|
+| Pipeline CI/CD | Otimizações manuais, detecção lenta de builds com falha | IA prevê builds com falha, otimiza cache e paralelismo |
+| Testes | Testes roteirizados, cobertura limitada, casos instáveis | IA gera casos de teste, detecta padrões instáveis, melhora a cobertura |
+| Monitoramento e incidentes | Alertas reativos, dashboards cheios de ruído | Análise preditiva, detecção de anomalias, sugestão automática de causa raiz |
+| Gestão de infraestrutura | Escalonamento manual, recursos superprovisionados | Escalonamento preditivo, dimensionamento certeiro, otimização de custo |
+| Deploys | Alto risco, rollback manual, aprovação humana | Pontuação de risco, gatilho automático de rollback, releases mais seguros |
+| Qualidade de código | Revisão só humana, detecção inconsistente | Revisão assistida por IA, vulnerabilidade detectada mais cedo, refatoração mais rápida |
+| Segurança e compliance | Varredura lenta, checagem manual de compliance | IA varre o código, detecta ameaças e aplica políticas de compliance |
+| Custos operacionais | Mais desperdício de nuvem, uso ineficiente de recursos | Custo reduzido via previsão de uso e otimização orientada por IA |
+
+**Onde o tempo realmente vai, em cada workflow:**
+
+No fluxo tradicional, sem agentes de IA, o foco principal são as tarefas repetitivas e manuais. Cerca de 80% do tempo é consumido por atividades como escrever código e configuração (Terraform, YAML, IAM, rede), copiar trechos de documentação, corrigir erros de sintaxe e rodar `plan` várias vezes, e ajustar pequenos detalhes até conseguir aplicar (`apply`). Os outros 20% do tempo, o que sobra, é que vai para decisões estratégicas de fato: escolher a arquitetura correta (por exemplo, origin access control vs. origin access identity) e definir o escopo adequado de permissões IAM. O impacto prático dessa distribuição é um ciclo longo, de semanas ou meses, até chegar ao deploy.
+
+No workflow agêntico, essa proporção se inverte. O foco principal passa a ser as decisões de engenharia e a revisão crítica, e é isso que consome os 80% do tempo: revisar o código gerado automaticamente (Terraform, pipelines, configs), validar se as configurações atendem aos requisitos de segurança e arquitetura, e tomar decisões sobre design e políticas. As tarefas repetitivas, agora, ocupam só uns 20% do tempo: executar `plan` e `apply` para confirmar, e fazer pequenos ajustes finais. O impacto é um ciclo curto, de horas ou poucos dias, até o deploy.
 
 ### 0.2 Um incidente, dois jeitos de resolver
 
@@ -81,9 +110,9 @@ Um pipeline de CI/CD tradicional é sempre a mesma esteira, A → B → C → D,
 
 O projeto que construiremos ao vivo é deliberadamente simples na superfície — um site estático — para que toda a atenção da audiência fique no *processo* (como o agente chega lá), não na complexidade da infraestrutura em si:
 
-- **Amazon S3**: bucket que armazena os arquivos estáticos do site (HTML/CSS/JS).
-- **Amazon CloudFront**: CDN na frente do bucket, responsável por HTTPS (via certificado ACM), cache e distribuição global.
-- **IAM**: política de acesso do CloudFront ao bucket seguindo o princípio de *least privilege* — o mínimo de permissão necessária, nada mais.
+- **Amazon S3** (`aws_s3_bucket`): bucket que armazena os arquivos estáticos do site (HTML/CSS/JS).
+- **Amazon CloudFront** (`aws_cloudfront_distribution`): CDN na frente do bucket, responsável por HTTPS (via certificado ACM), cache e distribuição global. O S3 é configurado como *origin* do CloudFront através de um **Origin Access Control** (`aws_cloudfront_origin_access_control`), o mecanismo atual da AWS para o CloudFront acessar um bucket privado sem expor o S3 diretamente à internet.
+- **IAM** (`aws_iam_policy_document`): política de acesso do CloudFront ao bucket seguindo o princípio de *least privilege*, o mínimo de permissão necessária, nada mais.
 - **(Opcional) Route 53**: DNS customizado, se houver domínio próprio.
 
 A regra combinada com a audiência: **nenhuma linha de Terraform ou YAML é escrita manualmente**. Todo `.tf`, todo `settings.json`, toda política IAM sai do agente — nosso trabalho é dar contexto e colocar guardrails.
@@ -160,6 +189,8 @@ Todos os arquivos encontrados são **concatenados** no contexto (não se sobresc
 
 No nosso workshop, o CLAUDE.md do projeto contém, entre outras coisas, a stack (Terraform + provider AWS), a convenção de nomenclatura de recursos, a região AWS padrão, e a instrução mais importante do arquivo: nunca escrever Terraform ou CI/CD à mão — usar sempre a skill certa. Veja o trecho real na seção 4.1.
 
+**Na prática, com e sem CLAUDE.md:** sem ele, toda sessão nova reexplica a stack e as convenções do zero, e o Claude pode tentar escrever Terraform à mão por não saber que existe uma skill pronta para isso. Com ele, esse contexto é carregado sozinho a cada sessão, e a regra "nunca escreva Terraform à mão" já está lá antes de qualquer prompt ser digitado.
+
 ---
 
 ### 1.3 Skills
@@ -174,7 +205,7 @@ No nosso workshop, o CLAUDE.md do projeto contém, entre outras coisas, a stack 
 
 **Detalhe de implementação relevante**: comandos customizados (antigo `.claude/commands/`) foram unificados com skills — um arquivo em `.claude/commands/deploy.md` e uma skill em `.claude/skills/deploy/SKILL.md` criam o mesmo comando `/deploy` e funcionam da mesma forma. Skills adicionam recursos extras: um diretório para arquivos de apoio, frontmatter para controlar quem invoca (você ou o próprio Claude), e a possibilidade de o Claude carregá-las automaticamente quando percebe que são relevantes.
 
-No workshop, a skill `deploy` (entre outras) encapsula o checklist completo de publicação: build do site → upload para S3 → invalidação de cache do CloudFront → verificação de saúde do endpoint. Ela é uma das quatro skills que testamos ao vivo — veja a seção 4.3 para a lista completa e a 4.4 para o arquivo real.
+No workshop, a skill `deploy` (entre outras) encapsula o checklist completo de publicação: build do site → upload para S3 → invalidação de cache do CloudFront → verificação de saúde do endpoint. Ela é uma das quatro skills que testamos ao vivo — a lista completa aparece logo a seguir nos slides, e a seção 4.3 deste documento tem os detalhes; a 4.4 traz o arquivo real.
 
 ---
 
@@ -209,9 +240,26 @@ No workshop, a skill `deploy` (entre outras) encapsula o checklist completo de p
 
 No workshop, o subagent `terraform-reviewer` terá acesso somente de leitura (`Read`, `Grep`, `Glob`) e a responsabilidade específica de revisar políticas IAM geradas antes de qualquer `apply` — um exemplo direto de restrição de ferramentas como controle de segurança.
 
+**Na prática, com e sem subagents:** sem eles, revisar uma política de IAM roda na mesma janela de contexto da conversa principal, arquivo por arquivo, consumindo espaço que não volta. Com o `terraform-reviewer` isolado, só o resumo final retorna, as ferramentas ficam restritas a leitura, e várias revisões podem rodar em paralelo, terminando no tempo da mais lenta, não na soma de todas.
+
 ---
 
-### 1.5 Rules
+### 1.5 Skills x Agents — a diferença na prática
+
+As duas estendem o Claude Code, mas resolvem perguntas diferentes: uma reutiliza um procedimento na mesma conversa, a outra isola uma tarefa em um contexto à parte.
+
+| | Skills | Agents (subagents) |
+|---|---|---|
+| Contexto | A mesma conversa principal | Janela isolada, própria |
+| O que volta | O corpo inteiro executa dentro do fluxo atual | Só a mensagem final, mais metadados |
+| Quando usar | Procedimento repetível, checklist, workflow | Tarefa que deve rodar separada, possivelmente em paralelo |
+| Quem decide usar | Claude (auto) ou você (`/nome`) | Claude (auto) ou você (explícito) |
+
+É a diferença entre rodar um script no seu próprio terminal, no mesmo processo (skill), e disparar um job separado num runner de CI/CD, em ambiente isolado, onde só o resultado final volta pro pipeline principal (subagent). As duas podem, inclusive, se combinar: uma skill pode instruir o Claude a delegar uma etapa específica a um subagent restrito, como acontece com o `terraform-reviewer` na seção 1.4.
+
+---
+
+### 1.6 Rules
 
 **O que é.** Regras específicas organizadas em `.claude/rules/`, um arquivo por tópico, que podem ser carregadas sempre (como o CLAUDE.md) ou apenas quando arquivos que batem com um padrão de caminho (`paths:`) são tocados pelo Claude.
 
@@ -234,9 +282,26 @@ Regras também podem ser compartilhadas entre projetos via **symlink** (`.claude
 
 No workshop, a regra `infra-security.md`, com `paths: ["**/*.tf"]`, vai carregar automaticamente sempre que o Claude tocar em qualquer arquivo Terraform, reforçando convenções como "toda IAM policy deve declarar recursos explicitamente, nunca usar `Resource: "*"`".
 
+**Na prática, com e sem rules:** sem elas, a convenção de IAM vive solta dentro de um CLAUDE.md geral e cada vez maior, ocupando espaço mesmo quando o Claude mexe em código sem relação com infraestrutura. Com `infra-security.md` e `paths: ["**/*.tf"]`, essa convenção só entra no contexto quando realmente importa, e pode ser revisada, versionada e compartilhada como um arquivo isolado.
+
 ---
 
-### 1.6 Agents × Skills × Rules — critério de decisão
+### 1.7 Rules x Hooks — contexto que orienta, execução que bloqueia
+
+As duas reagem a um evento, mas uma é lida pelo modelo, a outra é aplicada pelo harness — Hooks ganha o tratamento completo na seção 2.2, mas a comparação já ajuda a situar o conceito aqui, ao lado de Rules.
+
+| | Rules | Hooks |
+|---|---|---|
+| Camada | Contexto (soft) | Execução do harness (hard) |
+| Quando entra | Sempre, ou quando um path bate | Em eventos específicos do ciclo de vida |
+| Bloqueia de verdade? | Não, é orientação | Sim, retorna `deny` antes da execução |
+| Exemplo | "toda IAM policy declara recursos explicitamente" | bloquear `terraform destroy` no `PreToolUse` |
+
+É a diferença entre o guia de estilo de commits do time, que todo mundo tenta seguir (rule), e o hook de pre-commit que recusa o commit se o padrão não bater, e ninguém consegue burlar (hook). A régua da seção 2.1 se aplica aqui na íntegra: se pode ser esquecida ou mal interpretada pelo modelo, é *soft*; se é aplicada por código determinístico antes de o modelo decidir algo, é *hard*.
+
+---
+
+### 1.8 Agents × Skills × Rules — critério de decisão
 
 | Conceito | Quando carrega | Quem decide usar | Use para |
 |---|---|---|---|
@@ -248,17 +313,26 @@ Uma forma simples de decidir na prática: **é um fato que o Claude precisa sabe
 
 ---
 
-### 1.7 O harness: como as peças viram um agente
+### 1.9 O harness: como as peças viram um agente
 
 **O que é.** Como visto na seção 1.1, o harness é a camada que a própria documentação chama de "agentic harness": o programa Claude Code em si, que fornece as ferramentas, a gestão de contexto e o ambiente de execução que transformam um modelo de linguagem bruto em um agente capaz.
 
-CLAUDE.md, Skills, Agents, Rules, Hooks, MCP e Memória não competem entre si — cada um resolve uma pergunta diferente (veja a tabela completa na seção 3.3), e juntos são exatamente o que compõe o harness na prática. Sem harness, o modelo esquece tudo entre sessões e não tem limites; é a diferença entre um script solto e a esteira de CI/CD ao redor dele — sozinho, o script não sabe onde rodar, quem aprova ou o que é permitido, e é o pipeline com suas etapas e guardrails que torna o processo confiável.
+CLAUDE.md, Skills, Agents, Rules, Hooks, MCP e Memória não competem entre si — cada um resolve uma pergunta diferente (veja a tabela completa na seção 3.5), e juntos são exatamente o que compõe o harness na prática. Sem harness, o modelo esquece tudo entre sessões e não tem limites; é a diferença entre um script solto e a esteira de CI/CD ao redor dele — sozinho, o script não sabe onde rodar, quem aprova ou o que é permitido, e é o pipeline com suas etapas e guardrails que torna o processo confiável.
 
-Vale reforçar: o harness não é um mecanismo a mais na lista — ele é a soma organizada de todos os outros. É por isso que esta seção fica no meio do Módulo 1, depois de Rules: a essa altura, já vimos peças suficientes para que "harness" pare de ser uma palavra abstrata e vire a estrutura visível ao redor delas.
+Vale reforçar: o harness não é um mecanismo a mais na lista — ele é a soma organizada de todos os outros. É por isso que esta seção fica no meio do Módulo 1, depois de Rules e das duas comparações (Skills x Agents, Rules x Hooks): a essa altura, já vimos peças suficientes para que "harness" pare de ser uma palavra abstrata e vire a estrutura visível ao redor delas.
+
+**Onde cada mecanismo do nosso stack se encaixa**, usando a própria definição de harness (contexto + limites + ferramentas ao redor do modelo bruto):
+
+| Camada do harness | O que inclui, no nosso stack |
+|---|---|
+| Itens que definem o contexto | CLAUDE.md, Memória (Auto Memory) |
+| Itens que definem limites | Rules, Hooks, Permissions |
+| Ferramentas construídas ao redor | Skills, Agents, servidores MCP |
+| Modelo bruto | Claude, sem nenhuma dessas camadas ao redor |
 
 ---
 
-### 1.8 Terraform, em uma imagem
+### 1.10 Terraform, Infraestrutura como código (IaC)
 
 **O que é.** Ferramenta de *Infrastructure as Code* da HashiCorp: você descreve os recursos de infraestrutura em arquivos declarativos (HCL) e o Terraform calcula e executa o que for preciso — criar, atualizar ou destruir — para que o estado real bata com o que foi declarado.
 
@@ -276,7 +350,7 @@ $ terraform apply     # ✓ infraestrutura criada na AWS
 
 ---
 
-### 1.9 AWS: onde a infraestrutura vai morar
+### 1.11 AWS: onde a infraestrutura vai morar
 
 **O que é.** O maior provedor de nuvem pública: um catálogo de serviços gerenciados que substitui o data center físico — você aluga exatamente o que precisa (computação, armazenamento, rede, IA), pelo tempo que precisa, cobrado pelo uso.
 
@@ -295,7 +369,7 @@ Serviços da AWS usados ou citados no workshop: **S3** (armazenamento do site), 
 
 ---
 
-### 1.10 Memória (CLAUDE.md vs. Auto Memory)
+### 1.12 Memória (CLAUDE.md vs. Auto Memory)
 
 Cada sessão do Claude Code começa com uma janela de contexto vazia. Dois mecanismos carregam conhecimento entre sessões — e é importante não confundi-los:
 
@@ -312,9 +386,11 @@ Cada sessão do Claude Code começa com uma janela de contexto vazia. Dois mecan
 
 No workshop, depois de algumas iterações, a Auto Memory vai reter, por exemplo, que o bucket de teste sempre precisa da tag `Environment=workshop` — um padrão que o Claude aprendeu ao ser corrigido, sem que ninguém precisasse editar o CLAUDE.md manualmente.
 
+**Na prática, com e sem memória entre sessões:** sem ela, toda sessão nova esquece o padrão aprendido na anterior, e o mesmo erro é corrigido manualmente, de novo, toda vez. Com a Auto Memory, esse aprendizado gruda sozinho para a próxima sessão, registrado em `~/.claude/projects/.../memory/` sem que ninguém precise editar nada à mão.
+
 ---
 
-### 1.11 MCP — Model Context Protocol
+### 1.13 MCP — Model Context Protocol
 
 **O que é.** Segundo o anúncio original da Anthropic, o MCP é um **padrão aberto para conectar assistentes de IA aos sistemas onde os dados residem** — repositórios de conteúdo, ferramentas de negócio, ambientes de desenvolvimento — através de conexões seguras e bidirecionais.
 
@@ -336,7 +412,9 @@ No workshop, depois de algumas iterações, a Auto Memory vai reter, por exemplo
 }
 ```
 
-No workshop, vamos conectar um MCP server que dá ao Claude Code acesso a informações da conta AWS (por exemplo, verificar se um bucket já existe, consultar limites de serviço) e ao GitHub (para abrir o PR com as mudanças de infraestrutura antes do apply).
+No workshop, vamos conectar um MCP server que dá ao Claude Code acesso a informações da conta AWS (por exemplo, verificar se um bucket já existe, consultar limites de serviço) e ao GitHub (para abrir o PR com as mudanças de infraestrutura antes do apply). As seções 3.2 e 3.3 aprofundam a arquitetura real dos servidores MCP de Terraform e AWS.
+
+**Na prática, com e sem MCP:** sem ele, o Claude não tem acesso direto ao estado real da conta AWS e pode assumir, e errar, sobre limites de serviço ou recursos já existentes. Com um servidor MCP da AWS, ele consulta o estado real antes de agir, em vez de alucinar sobre a infraestrutura.
 
 ---
 
@@ -385,6 +463,8 @@ Esse retorno acontece **antes** de qualquer execução — é o próprio harness
 
 No workshop, o hook `PreToolUse` mais importante barra qualquer chamada `Bash` que contenha `terraform destroy` ou `aws iam create-user`, retornando `deny` imediatamente — o agente literalmente não consegue executar o comando, independente do que "decidiu" fazer.
 
+**Na prática, com e sem hooks:** sem eles, a única barreira contra um `terraform destroy` acidental é a instrução escrita no CLAUDE.md — contexto, não aplicação, e pode ser esquecida numa conversa longa. Com o hook `PreToolUse`, a chamada é interceptada antes de executar e recebe `deny`: o agente não consegue rodar o comando, ponto final, independente do que o modelo decidiu.
+
 ---
 
 ### 2.3 Permissions
@@ -427,6 +507,21 @@ A combinação das três camadas é o que permite dar ao agente autonomia real (
 
 ---
 
+### 2.5 Como o controle é realizado — CLAUDE.md x Rules x Hooks x Permissions
+
+Os quatro mecanismos que já vimos respondem à mesma pergunta de segurança — "o que garante que o agente se comporte direito?" — mas de formas bem diferentes:
+
+| Mecanismo | Camada | Quando atua | Bloqueia de verdade? | Exemplo no workshop |
+|---|---|---|---|---|
+| CLAUDE.md | Contexto (soft) | Sempre, início da sessão | Não | "nunca escreva Terraform à mão" |
+| Rules | Contexto condicional (soft) | Quando um path bate | Não | `infra-security.md` em `**/*.tf` |
+| Hooks | Harness (hard) | Em eventos do ciclo de vida | Sim, retorna `deny` | bloqueia `terraform destroy` |
+| Permissions | Harness (hard) | Antes de qualquer chamada de ferramenta | Sim, `allow`/`deny`/`ask` | `deny` em `aws iam create-user` |
+
+**Regra geral**: CLAUDE.md e Rules moldam o comportamento. Hooks e Permissions aplicam o comportamento, independente do que o modelo decida. Os dois primeiros são a camada de orientação; os dois últimos são a camada de aplicação — e um workflow agêntico maduro de infraestrutura precisa das duas, não apenas de uma.
+
+---
+
 <a name="módulo-3"></a>
 ## Módulo 3 — Integrações
 
@@ -436,26 +531,85 @@ No workshop, conectamos pelo menos um MCP server que dá ao Claude Code visibili
 
 Um segundo MCP server relevante é o do GitHub, usado para abrir automaticamente um Pull Request com as mudanças de Terraform propostas — mantendo um humano no laço de aprovação antes do `apply` chegar em produção, mesmo em um workflow altamente automatizado.
 
-### 3.2 Memória entre sessões, na prática
+---
 
-Ao longo de várias sessões de trabalho no mesmo projeto, a Auto Memory (Módulo 1.10) acumula decisões e padrões — convenção de tags, região AWS padrão do time, formato de nome de bucket — sem que ninguém precise manter isso manualmente atualizado em um documento. Isso é particularmente valioso em um contexto de ensino/workshop: erros cometidos e corrigidos ao vivo "grudam" automaticamente para a próxima sessão.
+### 3.2 Por dentro do MCP Server do Terraform
 
-### 3.3 Como tudo se combina
+**O que é.** Um servidor MCP mantido pela própria HashiCorp, que dá acesso em tempo real ao ecossistema Terraform, sem depender do que o modelo aprendeu em treino:
 
-A stack agêntica completa que construímos ao longo da live tem oito peças, cada uma respondendo a uma pergunta diferente:
+> *"[The Terraform MCP server] enhances AI models with real-time access to current Terraform provider documentation, modules, and policies."*
+
+**O que ele fornece ao Claude Code:**
+- Busca e recuperação da documentação atual de providers.
+- Informações de módulos, incluindo inputs, outputs e exemplos.
+- Políticas Sentinel, para governança e compliance.
+- Listagem de organizações e workspaces no HCP Terraform / Terraform Enterprise.
+- Operações de gestão de workspace: criar, atualizar e remover variáveis, tags e runs.
+
+**Protocolo e transporte**: como qualquer servidor MCP, a comunicação usa JSON-RPC 2.0, com dois transportes possíveis — `stdio` (invocação direta, o que usamos no workshop) ou HTTP com streaming, para expor o servidor pela rede.
+
+**Inicialização**, via `.mcp.json` (o servidor roda em um container Docker oficial da HashiCorp):
+
+```json
+{
+  "mcpServers": {
+    "terraform": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "hashicorp/terraform-mcp-server"]
+    }
+  }
+}
+```
+
+Isso significa que, no meio de uma sessão, o Claude pode checar a sintaxe correta de um resource do provider AWS, ou os inputs esperados por um módulo, sem que ninguém precise colar a documentação manualmente no chat.
+
+---
+
+### 3.3 Por dentro do MCP Server da AWS
+
+**O que é.** Um servidor MCP **gerenciado pela própria AWS**, que dá acesso seguro e autenticado a todos os serviços da conta, usando a mesma credencial IAM já configurada na sua máquina (seção 1.11):
+
+> *"[The AWS MCP Server is] a managed remote Model Context Protocol (MCP) server that gives AI agents and coding assistants secure, authenticated access to all AWS services."*
+
+**Três ferramentas cobrem praticamente qualquer operação da conta:**
+
+1. **`call_aws`** — executa qualquer uma das mais de 15 mil operações da API da AWS, usando a credencial IAM existente.
+2. **`search_documentation` / `read_documentation`** — recupera documentação e boas práticas da AWS no momento da consulta, para que o agente sempre trabalhe com informação atualizada.
+3. **`run_script`** — permite ao agente escrever um script Python curto, executado em um ambiente sandboxed no lado do servidor, com as mesmas permissões IAM herdadas, mas **sem acesso à rede**.
+
+O servidor também usa **Skills** próprias da AWS (um conceito paralelo, não confundir com as Skills do Claude Code da seção 1.3): *"curated guidance and best practices for the tasks where agents most commonly make mistakes"* — orientações específicas para os erros mais comuns em cada tipo de tarefa.
+
+**Inicialização**, via `mcp-proxy-for-aws`:
+
+```
+$ claude mcp add-json aws-mcp --scope user \
+  '{"command":"uvx","args":["mcp-proxy-for-aws==1.6.0", "https://aws-mcp.us-east-1.api.aws/mcp", "--metadata","AWS_REGION=us-west-2"]}'
+```
+
+O detalhe técnico que vale explicar para a audiência: o protocolo MCP exige OAuth 2.1, mas a AWS autentica por IAM/SigV4. O **MCP Proxy for AWS** é um proxy open source que roda localmente e faz essa ponte entre os dois modelos de autenticação, permitindo que um servidor MCP totalmente gerenciado pela AWS funcione sem exigir uma credencial OAuth separada.
+
+---
+
+### 3.4 Memória entre sessões, na prática
+
+Ao longo de várias sessões de trabalho no mesmo projeto, a Auto Memory (Módulo 1.12) acumula decisões e padrões — convenção de tags, região AWS padrão do time, formato de nome de bucket — sem que ninguém precise manter isso manualmente atualizado em um documento. Isso é particularmente valioso em um contexto de ensino/workshop: erros cometidos e corrigidos ao vivo "grudam" automaticamente para a próxima sessão.
+
+---
+
+### 3.5 Como tudo se combina
+
+A stack agêntica que construímos ao longo da live tem seis peças, cada uma respondendo a uma pergunta diferente:
 
 | Peça | Pergunta que responde |
 |---|---|
 | CLAUDE.md | O que este projeto é e como funciona? |
 | Skills | Como executo este procedimento específico? |
 | Agents | Quem faz esta tarefa isolada, e com que ferramentas? |
-| Rules | Que convenção vale quando toco neste tipo de arquivo? |
 | Hooks | O que é bloqueado ou validado, sempre, sem exceção? |
 | Permissions | O que este agente pode, não pode, ou precisa perguntar? |
 | MCP | A que sistemas externos este agente tem acesso? |
-| Memória | O que este agente já aprendeu sobre este projeto? |
 
-Nenhuma peça sozinha entrega um workflow agêntico seguro e produtivo — é a combinação das oito, orquestrada pelo harness (seção 1.7), que faz isso.
+Nenhuma peça sozinha entrega um workflow agêntico seguro e produtivo — é a combinação delas, orquestrada pelo harness (seção 1.9), que faz isso. Rules e Memória continuam fazendo parte do harness na prática (seção 1.9) e aparecem nas comparações das seções 1.7 e 1.8, mas não têm mais um slide dedicado só a elas na sequência ao vivo.
 
 ---
 
@@ -607,6 +761,8 @@ Sequência sugerida para a demonstração (ajuste o ritmo conforme o tempo dispo
 - **Ground truth**: informação real do ambiente (resultado de um teste, saída de um `terraform plan`, erro de compilação) que o agente usa para avaliar se o que fez de fato funcionou, em vez de assumir que funcionou.
 - **Bounded autonomy (autonomia limitada)**: o agente opera de forma independente dentro do loop, mas para em pontos de checagem definidos (aprovação de PR, limite de iterações, bloqueio de um hook) para feedback ou decisão humana.
 - **Workflow vs. Agent**: workflow é orquestração por caminhos de código pré-definidos (determinístico); agente é um sistema em que o próprio modelo direciona dinamicamente o processo e o uso de ferramentas (adaptativo).
+- **MCP Server gerenciado**: um servidor MCP hospedado e mantido pelo próprio provedor do serviço (como o da AWS ou o da HashiCorp para Terraform), em vez de rodar localmente — reduz a superfície de configuração, mas exige uma ponte de autenticação (como o MCP Proxy for AWS) quando o modelo de credenciais do provedor não é OAuth nativo.
+- **Grafo de conhecimento temporal**: uma base de memória que representa entidades e relações, em vez de um índice plano, e mantém histórico de validade no tempo — um fato substituído fica registrado como superado, não é apagado.
 - **Least privilege**: princípio de segurança que diz que qualquer identidade (usuário, papel, serviço) deve ter apenas as permissões estritamente necessárias para sua função.
 - **Context window**: a "memória de trabalho" do modelo em uma sessão — tudo que está carregado nela (CLAUDE.md, rules, histórico da conversa) consome espaço finito.
 - **Human-in-the-loop**: ponto do processo em que uma decisão exige aprovação humana explícita antes de prosseguir — no nosso workshop, tipicamente antes de um `terraform apply`.
@@ -628,6 +784,11 @@ Sequência sugerida para a demonstração (ajuste o ritmo conforme o tempo dispo
 - [Effective harnesses for long-running agents — Anthropic Engineering](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
 - [Introducing the Model Context Protocol — Anthropic](https://www.anthropic.com/news/model-context-protocol)
 - [Give Claude context: CLAUDE.md and better prompts — Claude Help Center](https://support.claude.com/en/articles/14553240-give-claude-context-claude-md-and-better-prompts)
+- [Terraform MCP server overview — HashiCorp Developer](https://developer.hashicorp.com/terraform/mcp-server)
+- [hashicorp/terraform-mcp-server — GitHub](https://github.com/hashicorp/terraform-mcp-server)
+- [The AWS MCP Server is now generally available — AWS News Blog](https://aws.amazon.com/blogs/aws/the-aws-mcp-server-is-now-generally-available/)
+- [awslabs/mcp — Open source MCP Servers for AWS](https://github.com/awslabs/mcp)
+- [getzep/graphiti — Build Real-Time Knowledge Graphs for AI Agents](https://github.com/getzep/graphiti)
 
 ---
 
